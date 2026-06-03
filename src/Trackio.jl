@@ -1,4 +1,4 @@
-module trackio
+module Trackio
 
 using Dates
 using HTTP
