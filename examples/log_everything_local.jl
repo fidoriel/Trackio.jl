@@ -1,26 +1,16 @@
 using Trackio
 using Dates
 
+const PROJECT = "julia-client-random-local"
+
 asset(name) = joinpath(@__DIR__, "assets", name)
 
-function require_remote_config()
-    has_space = haskey(ENV, "TRACKIO_SPACE_ID")
-    has_server = haskey(ENV, "TRACKIO_SERVER_URL") && haskey(ENV, "TRACKIO_WRITE_TOKEN")
-    if !has_space && !has_server
-        error(
-            "Set TRACKIO_SERVER_URL and TRACKIO_WRITE_TOKEN, or set TRACKIO_SPACE_ID. See examples/README.md.",
-        )
-    end
-end
-
 function main()
-    require_remote_config()
-
     run = Trackio.init(
-        "julia-client-demo-project";
-        name = "log-everything-demo",
+        PROJECT;
+        name = "random-local-demo",
         group = "examples",
-        report_to = :remote,
+        report_to = :local,
         config = Dict(
             "client" => "trackio.jl",
             "example" => basename(@__FILE__),
@@ -120,8 +110,6 @@ function main()
             ),
         )
 
-        Trackio.save(run, asset("demo_config.yaml"))
-
         Trackio.alert(
             run,
             "trackio.jl example completed";
@@ -134,6 +122,8 @@ function main()
     end
 
     println("Logged run: $(run.project) / $(run.name)")
+    println("Local database: $(Trackio.project_db_path(PROJECT))")
+    println("Open dashboard: uv tool run trackio show --project $PROJECT")
 end
 
 main()

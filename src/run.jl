@@ -11,6 +11,12 @@ function maybe_first(values...)
     return nothing
 end
 
+function normalize_report_to(report_to)
+    normalized = report_to isa Symbol ? report_to : Symbol(String(report_to))
+    normalized in (:local, :remote) || error("report_to must be :local or :remote")
+    return normalized
+end
+
 function init(
     project::AbstractString;
     name = nothing,
@@ -19,6 +25,7 @@ function init(
     server_url = nothing,
     config = nothing,
     resume = "never",
+    report_to = :local,
     webhook_url = nothing,
     webhook_min_level = nothing,
 )
@@ -27,55 +34,72 @@ function init(
     resume = String(resume)
     resume in ("never", "allow", "must") ||
         error("resume must be one of \"never\", \"allow\", or \"must\"")
+    report_to = normalize_report_to(report_to)
 
-    resolved_space_id = maybe_first(space_id, get(ENV, "TRACKIO_SPACE_ID", nothing))
-    resolved_server_url = maybe_first(server_url, get(ENV, "TRACKIO_SERVER_URL", nothing))
-    if resolved_space_id !== nothing
-        resolved_server_url = nothing
-    end
-
+    resolved_space_id = nothing
+    resolved_server_url = nothing
     client = nothing
+    backend = nothing
     server_base_url = nothing
     write_token = nothing
     hf_token = nothing
     source = nothing
 
-    if resolved_space_id !== nothing
-        source = String(resolved_space_id)
-        hf_token = get(ENV, "HF_TOKEN", nothing)
-        client = TrackioClient(source; hf_token = hf_token)
-    elseif resolved_server_url !== nothing
-        raw_server_url = String(resolved_server_url)
-        startswith(raw_server_url, "http://") ||
-            startswith(raw_server_url, "https://") ||
-            error("server_url must start with http:// or https://")
-        server_base_url, parsed_write_token = parse_trackio_server_url(raw_server_url)
-        write_token =
-            maybe_first(parsed_write_token, get(ENV, "TRACKIO_WRITE_TOKEN", nothing))
-        write_token === nothing && error(
-            "server_url logging requires a write token in ?write_token=... or TRACKIO_WRITE_TOKEN",
+    if report_to == :local
+        (space_id === nothing && server_url === nothing) || error(
+            "local logging does not accept space_id or server_url; use report_to=:remote",
         )
-        source = server_base_url
-        client = TrackioClient(server_base_url; write_token = write_token)
+        db_path = init_db(String(project))
+        backend = LocalBackend(db_path, String(project))
     else
-        error(
-            "remote logging requires space_id, server_url, TRACKIO_SPACE_ID, or TRACKIO_SERVER_URL",
-        )
-    end
+        if space_id !== nothing
+            resolved_space_id = String(space_id)
+        elseif server_url !== nothing
+            resolved_server_url = String(server_url)
+        elseif haskey(ENV, "TRACKIO_SPACE_ID")
+            resolved_space_id = ENV["TRACKIO_SPACE_ID"]
+        elseif haskey(ENV, "TRACKIO_SERVER_URL")
+            resolved_server_url = ENV["TRACKIO_SERVER_URL"]
+        else
+            error(
+                "remote logging requires space_id, server_url, TRACKIO_SPACE_ID, or TRACKIO_SERVER_URL",
+            )
+        end
 
-    supports_http_api(client) || error(
-        "Trackio server '$(client.base_url)' does not support HTTP API version $HTTP_API_VERSION",
-    )
+        if resolved_space_id !== nothing
+            source = String(resolved_space_id)
+            hf_token = get(ENV, "HF_TOKEN", nothing)
+            client = TrackioClient(source; hf_token = hf_token)
+        else
+            raw_server_url = String(resolved_server_url)
+            startswith(raw_server_url, "http://") ||
+                startswith(raw_server_url, "https://") ||
+                error("server_url must start with http:// or https://")
+            server_base_url, parsed_write_token = parse_trackio_server_url(raw_server_url)
+            write_token =
+                maybe_first(parsed_write_token, get(ENV, "TRACKIO_WRITE_TOKEN", nothing))
+            write_token === nothing && error(
+                "server_url logging requires a write token in ?write_token=... or TRACKIO_WRITE_TOKEN",
+            )
+            source = server_base_url
+            client = TrackioClient(server_base_url; write_token = write_token)
+        end
+
+        supports_http_api(client) || error(
+            "Trackio server '$(client.base_url)' does not support HTTP API version $HTTP_API_VERSION",
+        )
+        backend = RemoteBackend(client)
+    end
 
     run_name = name === nothing ? default_run_name(resolved_space_id) : String(name)
     run_id = replace(string(uuid4()), "-" => "")
     initial_last_step = nothing
 
     if name !== nothing && resume != "never"
-        existing = latest_matching_run(client, String(project), run_name)
+        existing = latest_matching_run(backend, String(project), run_name)
         if existing !== nothing
             run_id = string(get(existing, :id, get(existing, "id", run_id)))
-            initial_last_step = remote_last_step(client, String(project), run_name, run_id)
+            initial_last_step = last_step(backend, String(project), run_name, run_id)
         elseif resume == "must"
             error("resume=\"must\" requires an existing run named '$run_name'")
         end
@@ -96,6 +120,7 @@ function init(
         group === nothing ? nothing : String(group),
         run_config,
         client,
+        backend,
         nothing,
         initial_last_step === nothing ? 0 : Int(initial_last_step) + 1,
         false,
@@ -263,6 +288,22 @@ function remote_last_step(
     summary isa AbstractDict || return nothing
     last_step = get(summary, :last_step, get(summary, "last_step", nothing))
     return last_step isa Integer ? last_step : nothing
+end
+
+function latest_matching_run(backend::RemoteBackend, project::String, name::String)
+    return latest_matching_run(backend.client, project, name)
+end
+
+function latest_matching_run(::LocalBackend, project::String, name::String)
+    return local_latest_matching_run(project, name)
+end
+
+function last_step(backend::RemoteBackend, project::String, name::String, run_id::String)
+    return remote_last_step(backend.client, project, name, run_id)
+end
+
+function last_step(::LocalBackend, project::String, name::String, run_id::String)
+    return local_last_step(project, name, run_id)
 end
 
 function log(run::Run, metrics::AbstractDict; step = nothing)
