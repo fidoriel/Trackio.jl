@@ -1,8 +1,10 @@
 module Trackio
 
+using DBInterface
 using Dates
 using HTTP
 using JSON3
+using SQLite
 using UUIDs
 
 export Run,
@@ -29,6 +31,8 @@ export Run,
 include("types.jl")
 include("serialization.jl")
 include("client.jl")
+include("storage.jl")
+include("backend.jl")
 include("queue.jl")
 include("alerts.jl")
 include("media.jl")

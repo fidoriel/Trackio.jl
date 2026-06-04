@@ -54,7 +54,6 @@ function drain_queue!(queue::LogQueue)
 end
 
 function send_pending!(run::Run, queue::LogQueue)
-    run.client === nothing && error("remote client is not configured")
     logs = Dict{String,Any}[]
     system_logs = Dict{String,Any}[]
     alerts = Dict{String,Any}[]
@@ -71,28 +70,7 @@ function send_pending!(run::Run, queue::LogQueue)
         end
     end
 
-    if !isempty(logs)
-        predict(run.client, "/bulk_log"; logs = logs, hf_token = run.client.hf_token)
-    end
-    if !isempty(system_logs)
-        predict(
-            run.client,
-            "/bulk_log_system";
-            logs = system_logs,
-            hf_token = run.client.hf_token,
-        )
-    end
-    if !isempty(uploads)
-        predict(
-            run.client,
-            "/bulk_upload_media";
-            uploads = uploads,
-            hf_token = run.client.hf_token,
-        )
-    end
-    if !isempty(alerts)
-        predict(run.client, "/bulk_alert"; alerts = alerts, hf_token = run.client.hf_token)
-    end
+    flush_batch!(run.backend, logs, system_logs, alerts, uploads)
     empty!(queue.pending)
     return nothing
 end

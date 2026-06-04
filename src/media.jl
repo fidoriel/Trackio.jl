@@ -115,6 +115,21 @@ function remote_media_dict(run::Run, media::TrackioMedia, step::Int)
     )
 end
 
+function prepare_media(::RemoteBackend, run::Run, media::TrackioMedia, step::Int)
+    return remote_media_dict(run, media, step)
+end
+
+function prepare_media(::LocalBackend, run::Run, media::TrackioMedia, step::Int)
+    path = ensure_file_exists(media_path(media))
+    destination = local_media_file_path(run.project, run.name, step, media_extension(path))
+    cp(path, destination)
+    return Dict{String,Any}(
+        "_type" => media_type(media),
+        "file_path" => relpath(destination, media_dir()),
+        "caption" => media_caption(media),
+    )
+end
+
 function normalize_table_rows(columns, data, dataframe, rows)
     source = dataframe !== nothing ? dataframe : (data !== nothing ? data : rows)
     source === nothing && return Dict{String,Any}[]
@@ -173,7 +188,7 @@ end
 
 function media_aware_value(run::Run, value, step::Int)
     if value isa TrackioMedia
-        return remote_media_dict(run, value, step)
+        return prepare_media(run.backend, run, value, step)
     elseif value isa Table
         return Dict{String,Any}(
             "_type" => "trackio.table",

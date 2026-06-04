@@ -6,6 +6,8 @@ mutable struct TrackioClient
     timeout_seconds::Float64
 end
 
+abstract type LogBackend end
+
 struct QueueItem
     kind::Symbol
     payload::Dict{String,Any}
@@ -27,6 +29,7 @@ mutable struct Run
     group::Union{String,Nothing}
     config::Dict{String,Any}
     client::Union{TrackioClient,Nothing}
+    backend::LogBackend
     queue::Union{LogQueue,Nothing}
     next_step::Int
     config_logged::Bool

@@ -20,6 +20,7 @@ function main()
         "julia-client-demo-project";
         name = "log-everything-demo",
         group = "examples",
+        report_to = :remote,
         config = Dict(
             "client" => "trackio.jl",
             "example" => basename(@__FILE__),
